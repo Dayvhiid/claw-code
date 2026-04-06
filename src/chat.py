@@ -8,9 +8,9 @@ class AssistantChat:
         self.client = OllamaClient(model=model)
         self.registry = build_execution_registry()
         self.messages = [
-            {"role": "system", "content": "You are a helpful coding assistant with access to local tools. "
-                                         "You can run terminal commands, read files, and write files. "
-                                         "Always explain what you are doing. Use tools when necessary."}
+            {"role": "system", "content": "You are Ore, a helpful local coding assistant. "
+                                         "You are efficient, friendly, and always ask for permission before running commands. "
+                                         "Maintain your personality as Ore at all times."}
         ]
         self.tools_schema = [
             {
@@ -59,7 +59,7 @@ class AssistantChat:
         ]
 
     def run(self):
-        print("--- Claw Code Assistant (Local Ollama) ---")
+        print("--- Ore Code Assistant (Local Ollama) ---")
         print("Type 'exit' or 'quit' to stop.")
         
         while True:
@@ -81,44 +81,54 @@ class AssistantChat:
     def _process_turn(self):
         max_turns = 5
         for _ in range(max_turns):
+            # We use non-streaming to check for tool calls first
+            # (as parsing tools from stream is more complex with basic urllib)
             response = self.client.chat(self.messages, tools=self.tools_schema)
             
-            if response.text:
-                print(f"\nAssistant: {response.text}")
-                self.messages.append({"role": "assistant", "content": response.text})
+            if response.tool_calls:
+                for tool_call in response.tool_calls:
+                    func = tool_call.get("function", {})
+                    name = func.get("name")
+                    args = func.get("arguments", {})
 
-            if not response.tool_calls:
-                break
-
-            for tool_call in response.tool_calls:
-                func = tool_call.get("function", {})
-                name = func.get("name")
-                args = func.get("arguments", {})
-
-                print(f"[TOOL CALL] {name}({args})")
-                
-                # Execute via registry
-                tool = self.registry.tool(name)
-                if not tool:
-                    result_msg = f"Error: Tool {name} not found."
-                else:
-                    # Specialized handling for arguments
-                    if name == "FileWriteTool":
-                        result_msg = tool.tool_impl.file_write(args.get("path"), args.get("content")).message
-                    elif name == "BashTool":
-                        result_msg = tool.tool_impl.bash(args.get("command")).message
-                    elif name == "FileReadTool":
-                        res = tool.tool_impl.file_read(args.get("path"))
-                        result_msg = res.output if res.handled else res.message
+                    print(f"[TOOL CALL] {name}({args})")
+                    
+                    # Execute via registry
+                    tool = self.registry.tool(name)
+                    if not tool:
+                        result_msg = f"Error: Tool {name} not found."
                     else:
-                        result_msg = "Unknown tool."
+                        # Specialized handling for arguments
+                        if name == "FileWriteTool":
+                            result_msg = tool.tool_impl.file_write(args.get("path"), args.get("content")).message
+                        elif name == "BashTool":
+                            result_msg = tool.tool_impl.bash(args.get("command")).message
+                        elif name == "FileReadTool":
+                            res = tool.tool_impl.file_read(args.get("path"))
+                            result_msg = res.output if res.handled else res.message
+                        else:
+                            result_msg = "Unknown tool."
 
-                print(f"[TOOL RESULT] {result_msg}")
-                self.messages.append({
-                    "role": "tool",
-                    "content": result_msg,
-                    "tool_call_id": tool_call.get("id")
-                })
+                    print(f"[TOOL RESULT] {result_msg}")
+                    self.messages.append({
+                        "role": "tool",
+                        "content": result_msg,
+                        "tool_call_id": tool_call.get("id")
+                    })
+                continue # Run another turn after tool executions
+
+            # If no tool calls, perform a streaming chat for the final response
+            if response.text:
+                print("\nAssistant: ", end="")
+                full_text = ""
+                for token in self.client.chat_stream(self.messages):
+                    print(token, end="")
+                    sys.stdout.flush()
+                    full_text += token
+                print() # New line after stream
+                self.messages.append({"role": "assistant", "content": full_text})
+            
+            break
 
 if __name__ == "__main__":
     chat = AssistantChat()

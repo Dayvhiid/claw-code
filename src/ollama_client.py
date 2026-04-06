@@ -39,6 +39,28 @@ class OllamaClient:
         except Exception as e:
             return OllamaResponse(text=f"Unexpected error: {e}")
 
+    def chat_stream(self, messages: List[Dict[str, str]]):
+        url = f"{self.base_url}/api/chat"
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+
+        try:
+            with urllib.request.urlopen(req) as response:
+                for line in response:
+                    if line:
+                        chunk = json.loads(line.decode("utf-8"))
+                        if "message" in chunk and "content" in chunk["message"]:
+                            yield chunk["message"]["content"]
+                        if chunk.get("done"):
+                            break
+        except Exception as e:
+            yield f"\n[Stream Error]: {e}"
+
 if __name__ == "__main__":
     # Test connection
     client = OllamaClient()
