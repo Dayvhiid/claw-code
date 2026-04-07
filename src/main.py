@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from .bootstrap_graph import build_bootstrap_graph
 from .command_graph import build_command_graph
@@ -75,6 +76,14 @@ def build_parser() -> argparse.ArgumentParser:
     direct_parser.add_argument('target')
     deep_link_parser = subparsers.add_parser('deep-link-mode', help='simulate deep-link runtime branching')
     deep_link_parser.add_argument('target')
+
+    serve_parser = subparsers.add_parser('serve', help='run the local AI harness HTTP server')
+    serve_parser.add_argument('--host', default='127.0.0.1')
+    serve_parser.add_argument('--port', type=int, default=8000)
+    serve_parser.add_argument('--workspace-root')
+    serve_parser.add_argument('--model', default='qwen2.5-coder:latest')
+    serve_parser.add_argument('--ollama-url', default='http://localhost:11434')
+    serve_parser.add_argument('--no-trust-commands', action='store_true')
 
     show_command = subparsers.add_parser('show-command', help='show one mirrored command entry by exact name')
     show_command.add_argument('name')
@@ -182,6 +191,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == 'deep-link-mode':
         print(run_deep_link(args.target).as_text())
+        return 0
+    if args.command == 'serve':
+        from .server import run_server
+
+        run_server(
+            workspace_root=args.workspace_root or str(Path(__file__).resolve().parent.parent),
+            host=args.host,
+            port=args.port,
+            model=args.model,
+            ollama_url=args.ollama_url,
+            trust_commands=not args.no_trust_commands,
+        )
         return 0
     if args.command == 'show-command':
         module = get_command(args.name)
